@@ -10,76 +10,95 @@ public class Sound {
     private ByteArrayInputStream inputStream;
     public final Object streamKey = new Object();
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws InterruptedException{
         new Sound();
     }
 
-    public Sound() {
-        format = new AudioFormat(8000, 8, 1, true, true);
+    public Sound() throws InterruptedException {
+        format = new AudioFormat(44100, 16, 2, true, true);
 
-        outputStream = new ByteArrayOutputStream();
-        byte[] buf = new byte[32];
-        inputStream = new ByteArrayInputStream(buf);
 
-        Thread record = new Thread(new AudioRecorder(outputStream));
-        Thread listen = new Thread(new AudioListener(inputStream));
+//        outputStream = new ByteArrayOutputStream((int) format.getSampleRate() * format.getFrameSize());
+        byte[] buf = new byte[(int)format.getSampleRate() * format.getFrameSize()];
+//        inputStream = new ByteArrayInputStream(buf);
+
+        Thread record = new Thread(new AudioRecorder(buf));
+        Thread listen = new Thread(new AudioListener(buf));
 
         record.start();
         listen.start();
 
-        while(true) {
-            synchronized (streamKey) {
-                byte[] buffer = outputStream.toByteArray();
-                inputStream = new ByteArrayInputStream(buffer);
-            }
-        }
+        while(true);
+
+//        while(true) {
+//            synchronized (streamKey) {
+//                byte[] buffer = outputStream.toByteArray();
+//                inputStream = new ByteArrayInputStream(buffer);
+//            }
+//            Thread.sleep(10);
+//        }
     }
 
     private class AudioRecorder implements Runnable {
         private AtomicBoolean running;
 
-        public final Object runningKey = new Object();
-
         private OutputStream outputStream;
-
         private BufferedOutputStream bufferedOutputStream;
 
-        public AudioRecorder(OutputStream outputStream) { // constructor run when normal call
+        private byte[] buffer;
+
+//        public AudioRecorder(OutputStream outputStream) { // constructor run when normal call
+//            this.running = new AtomicBoolean(true);
+//            this.outputStream = outputStream;
+//            this.bufferedOutputStream = new BufferedOutputStream(this.outputStream);
+//        }
+
+        public AudioRecorder(byte[] buffer) { // constructor run when normal call
             this.running = new AtomicBoolean(true);
-            this.outputStream = outputStream;
-            this.bufferedOutputStream = new BufferedOutputStream(this.outputStream);
+            //this.outputStream = outputStream;
+//            this.bufferedOutputStream = new BufferedOutputStream(this.outputStream);
+            synchronized (streamKey) {
+                this.buffer = buffer;
+            }
         }
 
         @Override
         public void run() {
             try {
                 TargetDataLine line;
+                //byte[] buffer;
+                synchronized (streamKey) {
+                    DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
+                    line = (TargetDataLine) AudioSystem.getLine(info);
 
-                DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
-                line = (TargetDataLine) AudioSystem.getLine(info);
+                    line.open(format);
+                    line.start();
 
-                line.open(format);
-                line.start();
+//                    int bufferSize = (int) format.getSampleRate() * format.getFrameSize();
+//                    buffer = new byte[bufferSize];
+                }
 
-                int bufferSize = (int) format.getSampleRate() * format.getFrameSize();
-                byte[] buffer = new byte[bufferSize];
 
                 while(this.running.get()) {
 //                    System.out.println("Recording");
                     //do a record
 
                     //send to server a packet
-                    int count = line.read(buffer, 0, bufferSize);
-
-                    try {
-                        //write the audio data from the mic to the server
-                        synchronized (streamKey) {
-                            bufferedOutputStream.write(buffer);
-                        }
-//                        objectOutputStream.write(1);
-                    } catch (IOException ioException) {
-                        ioException.printStackTrace();
+                    synchronized (streamKey) {
+                        int count = line.read(this.buffer, 0, this.buffer.length);
+                        System.out.println("Recording");
                     }
+
+//                    try {
+//                        //write the audio data from the mic to the server
+//                        synchronized (streamKey) {
+////                            bufferedOutputStream.write(buffer);
+//                            System.out.println("write");
+//                        }
+////                        objectOutputStream.write(1);
+//                    } catch (IOException ioException) {
+//                        ioException.printStackTrace();
+//                    }
                 }
             } catch (LineUnavailableException lineUnavailableException) {
                 lineUnavailableException.printStackTrace();
@@ -100,37 +119,58 @@ public class Sound {
         private AtomicBoolean running;
         private InputStream inputStream;
         private BufferedInputStream bufferedInputStream;
-        public AudioListener(InputStream inputStream) {
+
+
+        private byte[] buffer;
+
+        public AudioListener(byte[] buffer) {
             this.running = new AtomicBoolean(true);
-            this.inputStream = inputStream;
-            this.bufferedInputStream = new BufferedInputStream(inputStream);
+            synchronized (streamKey) {
+                this.buffer = buffer;
+            }
         }
+
+
+//        public AudioListener(InputStream inputStream) {
+//            this.running = new AtomicBoolean(true);
+//            this.inputStream = inputStream;
+//            this.bufferedInputStream = new BufferedInputStream(inputStream);
+//        }
 
         @Override
         public void run() {
             try {
-                int bufferSize = (int) format.getSampleRate() * format.getFrameSize();
-                byte[] buffer = new byte[bufferSize];
+
+//                byte[] buffer;
+                SourceDataLine speakers;
+
+                synchronized (streamKey) {
+                    //int bufferSize = (int) format.getSampleRate() * format.getFrameSize();
+                    //buffer = new byte[bufferSize];
+
+                    DataLine.Info dataLineInfo = new DataLine.Info(SourceDataLine.class, format);
+                    speakers = (SourceDataLine) AudioSystem.getLine(dataLineInfo);
+                    speakers.open(format);
+                    speakers.start();
+                }
+
+
+
 
                 while (this.running.get()) {
                     //listen to server and play in speaker
                     synchronized (streamKey) {
-                        bufferedInputStream.read(buffer, 0, buffer.length);
+//                        bufferedInputStream.read(this.buffer, 0, buffer.length);
+//                        ByteArrayInputStream baiss = new ByteArrayInputStream(buffer);
+//                        AudioInputStream ais = new AudioInputStream(baiss, format, buffer.length);
+                        System.out.println("Playing");
+                        speakers.write(this.buffer, 0, this.buffer.length);
                     }
 
                     //play to speakers
-                    InputStream is = new ByteArrayInputStream(buffer);
-                    AudioInputStream ais = AudioSystem.getAudioInputStream(is);
-                    Clip clip = AudioSystem.getClip();
-                    clip.open(ais);
-                    clip.start();
-                    //Thread.sleep(clip.getMicrosecondLength());
-                    clip.stop();
                 }
-            } catch (IOException ioException) {
-                ioException.printStackTrace();
-            } catch (UnsupportedAudioFileException unsupportedAudioFileException) {
-                unsupportedAudioFileException.printStackTrace();
+//            } catch (IOException ioException) {
+//                ioException.printStackTrace();
             } catch (LineUnavailableException lineUnavailableException) {
                 lineUnavailableException.printStackTrace();
             }
