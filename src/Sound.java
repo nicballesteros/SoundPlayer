@@ -3,64 +3,155 @@ import java.io.*;
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static javax.sound.sampled.AudioSystem.getMixer;
+import static javax.sound.sampled.AudioSystem.getMixerInfo;
+
 public class Sound {
 
     private AudioFormat format;
     private ByteArrayOutputStream outputStream;
     private ByteArrayInputStream inputStream;
     public final Object streamKey = new Object();
+    private Mixer mixer;
 
     public static void main(String[] args) throws InterruptedException{
         new Sound();
     }
 
     public Sound() throws InterruptedException {
-        format = new AudioFormat(44100, 16, 2, true, true);
+        format = new AudioFormat(44100.0f, 16, 2, true, true);
+        mixer = getMixer(getMixerInfo()[10]);
 
+        Line.Info[] info = mixer.getTargetLineInfo();
+        Line.Info[] speakInfo = mixer.getSourceLineInfo();
+
+        try {
+            SourceDataLine speakers = (SourceDataLine) mixer.getLine(speakInfo[0]);
+            TargetDataLine microphone = (TargetDataLine) mixer.getLine(info[0]);
 
 //        outputStream = new ByteArrayOutputStream((int) format.getSampleRate() * format.getFrameSize());
-        byte[] buf = new byte[(int)format.getSampleRate() * format.getFrameSize()];
+//        byte[] buf = new byte[(int)format.getSampleRate() * format.getFrameSize()];
 //        inputStream = new ByteArrayInputStream(buf);
+//
+//        Thread record = new Thread(new AudioRecorder());
+//        Thread listen = new Thread(new AudioListener());
+//
+//        listen.start();
+//        record.start();
 
-        Thread record = new Thread(new AudioRecorder(buf));
-        Thread listen = new Thread(new AudioListener(buf));
+        AudioHandler runnable = new AudioHandler(speakers, microphone);
+        Thread audio = new Thread(runnable, "Audio-Handles");
 
-        record.start();
-        listen.start();
+        audio.start();
 
-        while(true);
+        } catch (LineUnavailableException lineUnavailableException) {
+            lineUnavailableException.printStackTrace();
+        }
+
+        while(true) {
+            System.out.println("Recording and playing and sending data and stuff");
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException interruptedException) {
+                interruptedException.printStackTrace();
+            }
+        }
+
 
 //        while(true) {
 //            synchronized (streamKey) {
-//                byte[] buffer = outputStream.toByteArray();
-//                inputStream = new ByteArrayInputStream(buffer);
+//                byte[] buffer2 = outputStream.toByteArray();
+//                inputStream = new ByteArrayInputStream(buffer2);
 //            }
-//            Thread.sleep(10);
+////            Thread.sleep(10);
 //        }
     }
+
+
+
+    private class AudioHandler implements Runnable {
+        private TargetDataLine microphone;
+        private SourceDataLine speakers;
+        private AtomicBoolean running;
+
+        private byte[] buffer;
+
+        public AudioHandler() {
+            try {
+                DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
+                this.microphone = (TargetDataLine) AudioSystem.getLine(info);
+
+                this.running = new AtomicBoolean(true);
+
+                info = new DataLine.Info(SourceDataLine.class, format);
+                this.speakers = (SourceDataLine) AudioSystem.getLine(info);
+            } catch (LineUnavailableException lineUnavailableException) {
+                lineUnavailableException.printStackTrace();
+            }
+        }
+
+        public AudioHandler(SourceDataLine speakers, TargetDataLine microphone) {
+            this.microphone = microphone;
+            this.speakers = speakers;
+            this.running = new AtomicBoolean(true);
+        }
+
+        @Override
+        public void run() {
+            int chunk = 1024;
+
+            this.buffer = new byte[chunk];
+
+
+            try {
+                speakers.open(format);
+                microphone.open(format);
+
+                microphone.start();
+                speakers.start();
+            } catch (LineUnavailableException lineUnavailableException) {
+                lineUnavailableException.printStackTrace();
+            }
+
+            while(running.get()) {
+                int count = microphone.read(this.buffer, 0, chunk);
+                speakers.write(this.buffer, 0, count);
+            }
+        }
+
+        public boolean isRunning() {
+            return running.get();
+        }
+
+        public void stopAllAudio() {
+            running.set(false);
+        }
+    }
+
+
+
 
     private class AudioRecorder implements Runnable {
         private AtomicBoolean running;
 
-        private OutputStream outputStream;
-        private BufferedOutputStream bufferedOutputStream;
+        private ByteArrayInputStream inputStream;
+       // private BufferedOutputStream bufferedOutputStream;
 
         private byte[] buffer;
 
-//        public AudioRecorder(OutputStream outputStream) { // constructor run when normal call
-//            this.running = new AtomicBoolean(true);
-//            this.outputStream = outputStream;
-//            this.bufferedOutputStream = new BufferedOutputStream(this.outputStream);
-//        }
-
-        public AudioRecorder(byte[] buffer) { // constructor run when normal call
+        public AudioRecorder() { // constructor run when normal call
             this.running = new AtomicBoolean(true);
-            //this.outputStream = outputStream;
-//            this.bufferedOutputStream = new BufferedOutputStream(this.outputStream);
-            synchronized (streamKey) {
-                this.buffer = buffer;
-            }
+//            this.inputStream = inputStream;
         }
+
+//        public AudioRecorder(byte[] buffer) { // constructor run when normal call
+//            this.running = new AtomicBoolean(true);
+//            //this.outputStream = outputStream;
+////            this.bufferedOutputStream = new BufferedOutputStream(this.outputStream);
+//            synchronized (streamKey) {
+//                this.buffer = buffer;
+//            }
+//        }
 
         @Override
         public void run() {
@@ -68,8 +159,8 @@ public class Sound {
                 TargetDataLine line;
                 //byte[] buffer;
                 synchronized (streamKey) {
-                    DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
-                    line = (TargetDataLine) AudioSystem.getLine(info);
+                    //DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
+                    line = (TargetDataLine) mixer.getLine(mixer.getTargetLineInfo()[0]);
 
                     line.open(format);
                     line.start();
@@ -85,10 +176,17 @@ public class Sound {
 
                     //send to server a packet
                     synchronized (streamKey) {
-                        int count = line.read(this.buffer, 0, this.buffer.length);
+                        byte[] buffer = new byte[(int)format.getSampleRate() * format.getFrameSize()];
+                        int count = line.read(buffer, 0, buffer.length);
                         System.out.println("Recording");
+                        inputStream = new ByteArrayInputStream(buffer);
+                        streamKey.notify();
                     }
-
+                    try {
+                        Thread.sleep(10);
+                    } catch (InterruptedException interruptedException) {
+                        interruptedException.printStackTrace();
+                    }
 //                    try {
 //                        //write the audio data from the mic to the server
 //                        synchronized (streamKey) {
@@ -123,11 +221,9 @@ public class Sound {
 
         private byte[] buffer;
 
-        public AudioListener(byte[] buffer) {
+        public AudioListener() {
             this.running = new AtomicBoolean(true);
-            synchronized (streamKey) {
-                this.buffer = buffer;
-            }
+
         }
 
 
@@ -148,8 +244,8 @@ public class Sound {
                     //int bufferSize = (int) format.getSampleRate() * format.getFrameSize();
                     //buffer = new byte[bufferSize];
 
-                    DataLine.Info dataLineInfo = new DataLine.Info(SourceDataLine.class, format);
-                    speakers = (SourceDataLine) AudioSystem.getLine(dataLineInfo);
+                    //DataLine.Info dataLineInfo = new DataLine.Info(SourceDataLine.class, format);
+                    speakers = (SourceDataLine) mixer.getLine(mixer.getSourceLineInfo()[0]);
                     speakers.open(format);
                     speakers.start();
                 }
@@ -163,8 +259,27 @@ public class Sound {
 //                        bufferedInputStream.read(this.buffer, 0, buffer.length);
 //                        ByteArrayInputStream baiss = new ByteArrayInputStream(buffer);
 //                        AudioInputStream ais = new AudioInputStream(baiss, format, buffer.length);
-                        System.out.println("Playing");
-                        speakers.write(this.buffer, 0, this.buffer.length);
+                        try {
+                            if(inputStream == null) {
+                                streamKey.wait();
+                                continue;
+                            }
+
+                            if (inputStream.available() == 0) {
+                                streamKey.wait();
+                            }
+
+
+                            byte[] buffer = new byte[(int)format.getSampleRate() * format.getFrameSize()];
+                            inputStream.read(buffer, 0, buffer.length);
+                            speakers.write(this.buffer, 0, this.buffer.length);
+                            System.out.println("Playing");
+
+                        } catch (IOException ioException) {
+                            ioException.printStackTrace();
+                        } catch (InterruptedException interruptedException) {
+                            interruptedException.printStackTrace();
+                        }
                     }
 
                     //play to speakers
