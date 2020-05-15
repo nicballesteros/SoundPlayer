@@ -1,6 +1,5 @@
 import javax.sound.sampled.*;
 import java.io.*;
-import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static javax.sound.sampled.AudioSystem.getMixer;
@@ -29,20 +28,10 @@ public class Sound {
             SourceDataLine speakers = (SourceDataLine) mixer.getLine(speakInfo[0]);
             TargetDataLine microphone = (TargetDataLine) mixer.getLine(info[0]);
 
-//        outputStream = new ByteArrayOutputStream((int) format.getSampleRate() * format.getFrameSize());
-//        byte[] buf = new byte[(int)format.getSampleRate() * format.getFrameSize()];
-//        inputStream = new ByteArrayInputStream(buf);
-//
-//        Thread record = new Thread(new AudioRecorder());
-//        Thread listen = new Thread(new AudioListener());
-//
-//        listen.start();
-//        record.start();
+            AudioHandler runnable = new AudioHandler(speakers, microphone);
+            Thread audio = new Thread(runnable, "Audio-Handles");
 
-        AudioHandler runnable = new AudioHandler(speakers, microphone);
-        Thread audio = new Thread(runnable, "Audio-Handles");
-
-        audio.start();
+            audio.start();
 
         } catch (LineUnavailableException lineUnavailableException) {
             lineUnavailableException.printStackTrace();
@@ -56,15 +45,6 @@ public class Sound {
                 interruptedException.printStackTrace();
             }
         }
-
-
-//        while(true) {
-//            synchronized (streamKey) {
-//                byte[] buffer2 = outputStream.toByteArray();
-//                inputStream = new ByteArrayInputStream(buffer2);
-//            }
-////            Thread.sleep(10);
-//        }
     }
 
 
@@ -129,7 +109,7 @@ public class Sound {
     }
 
 
-
+    //Everything below here is not proven to work.
 
     private class AudioRecorder implements Runnable {
         private AtomicBoolean running;
@@ -143,15 +123,6 @@ public class Sound {
             this.running = new AtomicBoolean(true);
 //            this.inputStream = inputStream;
         }
-
-//        public AudioRecorder(byte[] buffer) { // constructor run when normal call
-//            this.running = new AtomicBoolean(true);
-//            //this.outputStream = outputStream;
-////            this.bufferedOutputStream = new BufferedOutputStream(this.outputStream);
-//            synchronized (streamKey) {
-//                this.buffer = buffer;
-//            }
-//        }
 
         @Override
         public void run() {
@@ -249,9 +220,6 @@ public class Sound {
                     speakers.open(format);
                     speakers.start();
                 }
-
-
-
 
                 while (this.running.get()) {
                     //listen to server and play in speaker
